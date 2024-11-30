@@ -1,7 +1,7 @@
-use serde;
-use bincode;
-use rand;
-use itertools;
+extern crate serde;
+extern crate itertools;
+extern crate rand;
+extern crate bincode;
 
 mod disk_btree;
 mod multi_map;
@@ -11,21 +11,20 @@ use disk_btree::OnDiskBTree;
 use multi_map::MultiMap;
 use wal_file::{KeyValuePair, RecordFile};
 
-use bincode::rustc_serialize::{Decodable, Encodable};
-
 use std::error::Error;
 use itertools::merge;
+use serde::{Deserialize, Serialize};
 
 const MAX_MEMORY_ITEMS: usize = 1000;
 
 // specify the types for the keys & values
-pub trait KeyType: Ord + Encodable + Decodable + Clone {}
-pub trait ValueType: Ord + Encodable + Decodable + Clone {}
+pub trait KeyType: Eq + Ord + Clone + Serialize + for<'de> Deserialize<'de> {}
+pub trait ValueType: Ord + Clone + Serialize + for<'de> Deserialize<'de> {}
 
 // provide generic implementations
 
-impl<T> KeyType for T where T: Ord + Encodable + Decodable + Clone {}
-impl<T> ValueType for T where T: Ord + Encodable + Decodable + Clone {}
+impl<T> KeyType for T where T: Eq + Ord + Clone + Serialize + for<'de> Deserialize<'de> {}
+impl<T> ValueType for T where T: Ord + Clone + Serialize + for<'de> Deserialize<'de> {}
 
 /// This struct holds all the pieces of the BTree mechanism
 pub struct BTree<K: KeyType, V: ValueType> {
@@ -42,7 +41,7 @@ impl<K: KeyType, V: ValueType> BTree<K, V> {
         tree_file_path: &String,
         key_size: usize,
         value_size: usize,
-    ) -> Result<BTree<K, V>, Box<Error>> {
+    ) -> Result<BTree<K, V>, Box<dyn Error>> {
         // create our in-memory multimap
         let mut mem_tree = MultiMap::<K, V>::new();
 
@@ -73,7 +72,7 @@ impl<K: KeyType, V: ValueType> BTree<K, V> {
     }
 
     /// Inserts a key into the BTree
-    pub fn insert(&mut self, key: K, value: V) -> Result<(), Box<Error>> {
+    pub fn insert(&mut self, key: K, value: V) -> Result<(), Box<dyn Error>> {
         let record = KeyValuePair { key, value };
 
         self.wal_file.insert_record(&record)?;
@@ -94,7 +93,7 @@ impl<K: KeyType, V: ValueType> BTree<K, V> {
     }
 
     /// Merges the records on disk with the records in memory
-    fn compact(&mut self) -> Result<(), Box<Error>> {
+    fn compact(&mut self) -> Result<(), Box<dyn Error>> {
         // create a new on-disk BTree
         let mut new_tree_file = OnDiskBTree::<K, V>::new(
             self.tree_file_path.to_owned() + ".new",

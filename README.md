@@ -13,20 +13,20 @@ When you create a LSMBT 2 files are created: a blank B+ Tree file, and a blank W
 ### Insert (key,value)
 When a (key,value) pair is added to the LSMBT the following occurs:
 1. The (key,value) pair is written to the WAL file.
-1. The (key,value) pair is added to the in-memory BTree. If the size of the in-memory BTree hits a particular threshold, then
-  1. The in-memory BTree is merged with the on-disk B+Tree to create a new on-disk B+Tree.
-  1. The in-memory BTree and the WAL file are both truncated.
+2. The (key,value) pair is added to the in-memory BTree. If the size of the in-memory BTree hits a particular threshold, then 
+   - The in-memory BTree is merged with the on-disk B+Tree to create a new on-disk B+Tree. 
+   - The in-memory BTree and the WAL file are both truncated.
 
 ### Get Values
 Because a key can be associated with a set (no duplicate values per key) of values, the `get` method returns a list of values:
 
 1. Collect all of the values associated with a given key in the in-memory BTree.
-1. Collect all of the values associated with a given key in the on-disk B+Tree.
-1. Return all the unique values
+2. Collect all of the values associated with a given key in the on-disk B+Tree. 
+3. Return all the unique values
 
 ### Delete Value
 Again, because a key can be associated with a set of values, the value to be removed must be supplied during a delete:
 
 1. Remove the value from the in-memory BTree. If it is the only value associated with the key, then remove the key as well.
-1. Mark the value in the on-disk B+Tree as deleted. (The value isn't actually removed until a compaction occurs.)
+2. Mark the value in the on-disk B+Tree as deleted. (The value isn't actually removed until a compaction occurs.)
 

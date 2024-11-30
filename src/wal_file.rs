@@ -6,12 +6,10 @@ use std::fs::{File, OpenOptions};
 use std::io::Error as IOError;
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
-use bincode::rustc_serialize::{decode, encode};
-use bincode::SizeLimit;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, PartialEq)]
-pub struct KeyValuePair<K: KeyType, V: ValueType> {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KeyValuePair<K, V> {
     pub key: K,
     pub value: V,
 }
@@ -30,10 +28,16 @@ pub struct RecordFile<K: KeyType, V: ValueType> {
     fd: File, // the file
     key_size: usize,
     value_size: usize,
+    // Represent TypeState to ensure K and V are not ignored by the compiler
+    // event though no value of type K and V are stored
     _k_marker: PhantomData<K>,
     _v_marker: PhantomData<V>,
 }
 
+
+// The a' lifetime is explicitly used because RecordFileIterator holds a mutable reference
+// to RecordFile. This means the iterator's lifetime is directly tied to the lifetime of the borrowed RecordFile.\
+// K: KeyType + 'a and V: ValueType + 'a ensure that the key and value types live at least as long as the iterator.
 pub struct RecordFileIterator<'a, K: KeyType + 'a, V: ValueType + 'a> {
     wal_file: &'a mut RecordFile<K, V>, // the file
 }
@@ -43,7 +47,7 @@ impl<K: KeyType, V: ValueType> RecordFile<K, V> {
         wal_file_path: &String,
         key_size: usize,
         value_size: usize,
-    ) -> Result<RecordFile<K, V>, Box<Error>> {
+    ) -> Result<RecordFile<K, V>, Box<dyn Error>> {
         let wal_file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -59,12 +63,12 @@ impl<K: KeyType, V: ValueType> RecordFile<K, V> {
         })
     }
 
-    pub fn is_new(&self) -> Result<bool, Box<Error>> {
+    pub fn is_new(&self) -> Result<bool, Box<dyn Error>> {
         Ok(self.fd.metadata()?.len() == 0)
     }
 
     /// Returns the number of records in the WAL file
-    pub fn count(&self) -> Result<u64, Box<Error>> {
+    pub fn count(&self) -> Result<u64, Box<dyn Error>> {
         let file_size = self.fd.metadata()?.len();
         let rec_size: u64 = (self.key_size + self.value_size) as u64;
 
@@ -78,12 +82,13 @@ impl<K: KeyType, V: ValueType> RecordFile<K, V> {
         }
     }
 
-    pub fn insert_record(&mut self, kv: &KeyValuePair<K, V>) -> Result<(), Box<Error>> {
+    pub fn insert_record(&mut self, kv: &KeyValuePair<K, V>) -> Result<(), Box<dyn Error>> {
         // encode the record
         let record_size = self.key_size + self.value_size;
-        let mut buff = encode(&kv, SizeLimit::Bounded(record_size as u64))?;
+        let mut buff = Vec::with_capacity(record_size);
+        bincode::serialize_into(&mut buff, &kv)?;
 
-        // padd it out to the max size
+        // pad it out to the max size
         if buff.len() > self.key_size + self.value_size {
             return Err(From::from(IOError::new(
                 ErrorKind::InvalidData,
@@ -107,7 +112,7 @@ impl<'a, K: KeyType, V: ValueType> IntoIterator for &'a mut RecordFile<K, V> {
 
     fn into_iter(self) -> Self::IntoIter {
         // seek back to the start
-        self.fd.seek(SeekFrom::Start(0));
+        self.fd.seek(SeekFrom::Start(0)).expect("TODO: panic message");
 
         // create our iterator
         RecordFileIterator { wal_file: self }
@@ -125,14 +130,11 @@ impl<'a, K: KeyType, V: ValueType> Iterator for RecordFileIterator<'a, K, V> {
 
         // attempt to read a buffer's worth and decode
         match self.wal_file.fd.read_exact(&mut buff) {
-            Ok(_) => match decode(&buff) {
+            Ok(_) => match bincode::deserialize(&buff) {
                 Ok(record) => Some(record),
                 Err(_) => None,
             },
-            Err(e) => {
-                println!("ERROR: {}", e);
-                None
-            }
+            Err(_) => None
         }
     }
 }
@@ -179,6 +181,6 @@ mod tests {
         assert_eq!(kv2.key, it_kv2.key);
         assert_eq!(kv2.value, it_kv2.value);
 
-        fs::remove_file(&file_path);
+        fs::remove_file(&file_path).expect("TODO: panic message");
     }
 }
